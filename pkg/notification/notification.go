@@ -1,11 +1,13 @@
 package notification
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"math"
 	"time"
 
+	"github.com/IBM/sarama"
 	"notification-service.com/m/pkg/email"
 	"notification-service.com/m/pkg/inapp"
 	"notification-service.com/m/pkg/sms"
@@ -46,7 +48,7 @@ func SendNotification(n Notification, smsClient *sms.SMSClientTwilio, emailClien
 }
 
 // ProcessNotification với cơ chế retry.
-func ProcessNotification(n Notification, smsClient *sms.SMSClientTwilio, emailClient *email.EmailClient, inAppClient *inapp.SSEManager, maxRetries int) error {
+func ProcessNotification(n Notification, smsClient *sms.SMSClientTwilio, emailClient *email.EmailClient, inAppClient *inapp.SSEManager, maxRetries int, dlqProducer sarama.SyncProducer, dlqTopic string) error {
 	var sendErr error
 	for i := range maxRetries {
 		sendErr = SendNotification(n, smsClient, emailClient, inAppClient)
@@ -58,5 +60,28 @@ func ProcessNotification(n Notification, smsClient *sms.SMSClientTwilio, emailCl
 		log.Printf("Retry gửi notification %s sau %v vì lỗi: %v", n.ID, backoffDuration, sendErr)
 		time.Sleep(backoffDuration)
 	}
+	log.Printf("Notification %s thất bại sau %d lần retry, đưa vào DLQ.", n.ID, maxRetries)
+	if err := pushToDLQ(n, dlqProducer, dlqTopic); err != nil {
+		log.Printf("Lỗi đưa notification %s vào DLQ: %v", n.ID, err)
+	}
 	return sendErr
+
+}
+
+// pushToDLQ chuyển thông báo vào Dead Letter Queue.
+func pushToDLQ(n Notification, producer sarama.SyncProducer, dlqTopic string) error {
+	data, err := json.Marshal(n)
+	if err != nil {
+		return err
+	}
+	msg := &sarama.ProducerMessage{
+		Topic: dlqTopic,
+		Value: sarama.ByteEncoder(data),
+	}
+	partition, offset, err := producer.SendMessage(msg)
+	if err != nil {
+		return err
+	}
+	log.Printf("Notification %s được đưa vào DLQ tại partition %d, offset %d", n.ID, partition, offset)
+	return nil
 }

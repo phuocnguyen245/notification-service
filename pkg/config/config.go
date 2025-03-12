@@ -10,10 +10,10 @@ import (
 
 // Config định nghĩa cấu hình ứng dụng.
 type Config struct {
-	MongoURI     string
-	KafkaBrokers []string
-	SMSApiKey    string
-	SMSApiSecret string
+	MongoURI         string
+	KafkaBrokers     []string
+	SMSApiAccountSID string
+	SMSApiAuthToken  string
 }
 
 // LoadConfig đọc file .env và trả về Config.
@@ -24,9 +24,9 @@ func LoadConfig() *Config {
 	}
 
 	cfg := &Config{
-		MongoURI:     os.Getenv("MONGO_URI"),
-		SMSApiKey:    os.Getenv("SMS_API_KEY"),
-		SMSApiSecret: os.Getenv("SMS_API_SECRET"),
+		MongoURI:         os.Getenv("MONGO_URI"),
+		SMSApiAccountSID: os.Getenv("SMS_API_ACCOUNT_SID"),
+		SMSApiAuthToken:  os.Getenv("SMS_API_AUTH_TOKEN"),
 	}
 
 	// Đọc Kafka brokers (chuỗi phân cách bởi dấu phẩy)

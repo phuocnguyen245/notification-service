@@ -1,6 +1,8 @@
 package kafka
 
 import (
+	"log"
+
 	"github.com/IBM/sarama"
 )
 
@@ -8,5 +10,12 @@ import (
 func NewConsumer(brokers []string) (sarama.Consumer, error) {
 	config := sarama.NewConfig()
 	config.Consumer.Return.Errors = true
-	return sarama.NewConsumer(brokers, config)
+
+	consumer, err := sarama.NewConsumer(brokers, config)
+	if err != nil {
+		log.Printf("Lỗi tạo Kafka consumer: %v", err)
+		return nil, err
+	}
+	log.Printf("Consumer create success")
+	return consumer, nil
 }

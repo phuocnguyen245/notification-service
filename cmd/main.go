@@ -30,7 +30,7 @@ func main() {
 	log.Println("Kết nối MongoDB thành công.")
 
 	// 3. Khởi tạo SMS client từ cấu hình.
-	smsClient := sms.NewSMSClientTwilio(cfg.SMSApiKey, cfg.SMSApiSecret, "+1234567890")
+	smsClient := sms.NewSMSClientTwilio(cfg.SMSApiAccountSID, cfg.SMSApiAuthToken, "+16366890610")
 
 	emailClient := email.NewEmailClient("smtp.gmail.com", 587, "", "", "")
 
@@ -45,23 +45,26 @@ func main() {
 	defer consumer.Close()
 
 	// 5. Consume message từ Kafka (sử dụng partition 0 cho demo, có thể mở rộng cho nhiều partition).
-	partitionConsumer, err := consumer.ConsumePartition("notification_events", 0, sarama.OffsetNewest)
+	topic := "notification_events"
+	partitionConsumer, err := consumer.ConsumePartition(topic, 0, sarama.OffsetNewest)
 	if err != nil {
 		log.Fatalf("Lỗi tạo partition consumer: %v", err)
 	}
 	defer partitionConsumer.Close()
 	log.Println("Kafka consumer đang lắng nghe topic: notification_events")
 
+	dlqProducer := kafka.NewProducer(cfg)
+
 	// 6. Xử lý message nhận được.
 	for msg := range partitionConsumer.Messages() {
 		log.Printf("Nhận được message Kafka: %s", string(msg.Value))
 		// Xử lý từng message trên một goroutine riêng.
-		go handleMessage(msg.Value, smsClient, emailClient, inapp.Manager, notificationCollection)
+		go handleMessage(msg.Value, smsClient, emailClient, inapp.Manager, notificationCollection, dlqProducer)
 	}
 }
 
 // handleMessage parse message JSON thành Notification struct và gọi xử lý gửi thông báo.
-func handleMessage(msg []byte, smsClient *sms.SMSClientTwilio, emailClient *email.EmailClient, inAppClient *inapp.SSEManager, collection database.Collection) {
+func handleMessage(msg []byte, smsClient *sms.SMSClientTwilio, emailClient *email.EmailClient, inAppClient *inapp.SSEManager, collection database.Collection, dlqProducer sarama.SyncProducer) {
 	var n notification.Notification
 	if err := json.Unmarshal(msg, &n); err != nil {
 		log.Printf("Lỗi parse message: %v", err)
@@ -78,7 +81,7 @@ func handleMessage(msg []byte, smsClient *sms.SMSClientTwilio, emailClient *emai
 	}
 
 	// Xử lý gửi thông báo với cơ chế retry (maxRetries = 3)
-	if err := notification.ProcessNotification(n, smsClient, emailClient, inAppClient, 3); err != nil {
+	if err := notification.ProcessNotification(n, smsClient, emailClient, inAppClient, 3, dlqProducer, "asd"); err != nil {
 		log.Printf("Notification %s gửi thất bại: %v", n.ID, err)
 		// Cập nhật trạng thái failed trong DB (bổ sung update ở đây)
 		database.UpdateNotificationStatus(collection, n.ID, "failed")
